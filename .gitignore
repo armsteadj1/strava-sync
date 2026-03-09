@@ -1,0 +1,4 @@
+config.json
+fitness.db
+node_modules/
+dist/
