@@ -21,7 +21,27 @@ export interface StravaActivity {
   average_heartrate?: number;
   max_heartrate?: number;
   total_elevation_gain: number;
+  description?: string;
+  private_note?: string;
+  average_watts?: number;
+  max_watts?: number;
+  weighted_average_watts?: number;
 }
+
+export interface StreamDataPoint {
+  time_offset: number;
+  watts?: number;
+  heartrate?: number;
+  cadence?: number;
+  velocity_ms?: number;
+  altitude_m?: number;
+}
+
+// Sport types that have meaningful power/HR streams
+const STREAM_SPORT_TYPES = new Set([
+  'Ride', 'VirtualRide', 'Run', 'VirtualRun', 'Walk', 'Hike',
+  'Swim', 'Rowing', 'Kayaking', 'Elliptical',
+]);
 
 function readConfig(): Config {
   return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
@@ -31,7 +51,7 @@ function writeConfig(config: Config): void {
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
 }
 
-async function getAccessToken(): Promise<string> {
+export async function getAccessToken(): Promise<string> {
   const config = readConfig();
   const now = Math.floor(Date.now() / 1000);
 
@@ -98,4 +118,64 @@ export async function fetchActivities(afterEpoch: number): Promise<StravaActivit
   }
 
   return all;
+}
+
+/** Fetch detailed activity (includes description + private_note + power fields) */
+export async function fetchActivityDetail(id: number): Promise<StravaActivity> {
+  const token = await getAccessToken();
+  const res = await fetch(`https://www.strava.com/api/v3/activities/${id}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Activity detail fetch failed for ${id}: ${res.status} ${text}`);
+  }
+
+  return res.json() as Promise<StravaActivity>;
+}
+
+/** Fetch time-series streams for an activity */
+export async function fetchActivityStreams(
+  id: number,
+  sportType: string
+): Promise<StreamDataPoint[] | null> {
+  if (!STREAM_SPORT_TYPES.has(sportType)) return null;
+
+  const token = await getAccessToken();
+  const keys = 'time,watts,heartrate,cadence,velocity_smooth,altitude';
+  const res = await fetch(
+    `https://www.strava.com/api/v3/activities/${id}/streams?keys=${keys}&key_by_type=true`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+
+  if (res.status === 404) return null; // No streams available
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Streams fetch failed for ${id}: ${res.status} ${text}`);
+  }
+
+  const data = await res.json() as Record<string, { data: number[] }>;
+  const timeArr: number[] = data['time']?.data ?? [];
+  if (timeArr.length === 0) return null;
+
+  const wattsArr = data['watts']?.data;
+  const hrArr = data['heartrate']?.data;
+  const cadArr = data['cadence']?.data;
+  const velArr = data['velocity_smooth']?.data;
+  const altArr = data['altitude']?.data;
+
+  return timeArr.map((t, i) => ({
+    time_offset: t,
+    watts: wattsArr?.[i] ?? undefined,
+    heartrate: hrArr?.[i] ?? undefined,
+    cadence: cadArr?.[i] ?? undefined,
+    velocity_ms: velArr?.[i] ?? undefined,
+    altitude_m: altArr?.[i] ?? undefined,
+  }));
+}
+
+/** Sleep helper for rate limiting */
+export function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }

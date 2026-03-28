@@ -25,12 +25,48 @@ function initSchema(db: Database.Database): void {
       avg_hr REAL,
       max_hr REAL,
       total_elevation_gain REAL,
+      description TEXT,
+      private_notes TEXT,
+      avg_watts REAL,
+      max_watts REAL,
+      weighted_avg_watts REAL,
+      has_streams INTEGER DEFAULT 0,
       synced_at TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS activity_streams (
+      activity_id INTEGER NOT NULL,
+      time_offset INTEGER NOT NULL,
+      watts INTEGER,
+      heartrate INTEGER,
+      cadence INTEGER,
+      velocity_ms REAL,
+      altitude_m REAL,
+      PRIMARY KEY (activity_id, time_offset)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_streams_activity ON activity_streams(activity_id);
 
     CREATE TABLE IF NOT EXISTS sync_state (
       key TEXT PRIMARY KEY,
       value TEXT
     );
   `);
+
+  // Migrate: add new columns if they don't exist yet
+  const cols = (db.prepare("PRAGMA table_info(activities)").all() as { name: string }[]).map(r => r.name);
+  const newCols: [string, string][] = [
+    ['description', 'TEXT'],
+    ['private_notes', 'TEXT'],
+    ['avg_watts', 'REAL'],
+    ['max_watts', 'REAL'],
+    ['weighted_avg_watts', 'REAL'],
+    ['has_streams', 'INTEGER DEFAULT 0'],
+  ];
+  for (const [col, type] of newCols) {
+    if (!cols.includes(col)) {
+      db.exec(`ALTER TABLE activities ADD COLUMN ${col} ${type}`);
+      console.log(`  Migrated: added column activities.${col}`);
+    }
+  }
 }
