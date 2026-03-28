@@ -1,6 +1,6 @@
 {
   "name": "@armsteadj1/strava-sync",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "bin": {
     "strava-sync": "./dist/index.js"
   },
